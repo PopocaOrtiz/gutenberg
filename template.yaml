@@ -1,0 +1,137 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Resources:
+
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: UsersTable
+      AttributeDefinitions:
+        - AttributeName: UserId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: UserId
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  BookTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: BooksTable
+      AttributeDefinitions:
+        - AttributeName: BookID
+          AttributeType: N
+      KeySchema:
+        - AttributeName: BookID
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  UserBooksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: UserBooksTable
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: book_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: book_id
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  UserRegistrationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: users.register_user
+      Runtime: python3.12
+      CodeUri: ./src
+      Environment:
+        Variables:
+          USERS_TABLE: !Ref UsersTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+      Events:
+        RegisterUser:
+          Type: Api
+          Properties:
+            Path: /user/register
+            Method: POST
+
+  AuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: users.authorizer
+      Runtime: python3.12
+      CodeUri: ./src
+      Environment:
+        Variables:
+          USERS_TABLE: !Ref UsersTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Auth:
+        Authorizers:
+          UserAuthorizer:
+            FunctionArn: !GetAtt AuthorizerFunction.Arn
+            FunctionPayloadType: TOKEN
+            Identity:
+              Headers:
+                - X-User-Id
+
+  GetBookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: books.get_book
+      Runtime: python3.12
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref BookTable
+          GUTENBERG_API_URL: "https://www.gutenberg.org/"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BookTable
+      Events:
+        GetBookAPI:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /book/{id}
+            Method: GET
+            Auth:
+              Authorizer: UserAuthorizer
+
+  GetUserBooks:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: books.get_user_books
+      Runtime: python3.12
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref BookTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref BookTable
+      Events:
+        GetUserBooksAPI:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /books
+            Method: GET
+            Auth:
+              Authorizer: UserAuthorizer
