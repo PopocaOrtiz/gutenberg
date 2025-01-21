@@ -7,10 +7,10 @@ Resources:
     Properties:
       TableName: UsersTable
       AttributeDefinitions:
-        - AttributeName: UserId
+        - AttributeName: user_id
           AttributeType: S
       KeySchema:
-        - AttributeName: UserId
+        - AttributeName: user_id
           KeyType: HASH
       ProvisionedThroughput:
         ReadCapacityUnits: 5
@@ -21,10 +21,10 @@ Resources:
     Properties:
       TableName: BooksTable
       AttributeDefinitions:
-        - AttributeName: BookID
+        - AttributeName: book_id
           AttributeType: N
       KeySchema:
-        - AttributeName: BookID
+        - AttributeName: book_id
           KeyType: HASH
       ProvisionedThroughput:
         ReadCapacityUnits: 5
@@ -38,7 +38,7 @@ Resources:
         - AttributeName: user_id
           AttributeType: S
         - AttributeName: book_id
-          AttributeType: S
+          AttributeType: N
       KeySchema:
         - AttributeName: user_id
           KeyType: HASH
@@ -47,6 +47,37 @@ Resources:
       ProvisionedThroughput:
         ReadCapacityUnits: 5
         WriteCapacityUnits: 5
+
+  AuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: users.authorizer
+      Runtime: python3.12
+      CodeUri: ./src
+      Environment:
+        Variables:
+          USERS_TABLE: !Ref UsersTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Auth:
+        Authorizers:
+          UserAuthorizer:
+            FunctionArn: !GetAtt AuthorizerFunction.Arn
+            FunctionPayloadType: TOKEN
+            Identity:
+              Headers:
+                - X-User-Id
+      Cors:
+        AllowMethods: "'OPTIONS,POST,GET'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+        MaxAge: "'600'"
 
   UserRegistrationFunction:
     Type: AWS::Serverless::Function
@@ -64,47 +95,26 @@ Resources:
         RegisterUser:
           Type: Api
           Properties:
+            RestApiId: !Ref Api
             Path: /user/register
             Method: POST
-
-  AuthorizerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: users.authorizer
-      Runtime: python3.12
-      CodeUri: ./src
-      Environment:
-        Variables:
-          USERS_TABLE: !Ref UsersTable
-      Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref UsersTable
-
-  Api:
-    Type: AWS::Serverless::Api
-    Properties:
-      StageName: Prod
-      Auth:
-        Authorizers:
-          UserAuthorizer:
-            FunctionArn: !GetAtt AuthorizerFunction.Arn
-            FunctionPayloadType: TOKEN
-            Identity:
-              Headers:
-                - X-User-Id
 
   GetBookFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: books.get_book
       Runtime: python3.12
+      CodeUri: ./src
       Environment:
         Variables:
-          TABLE_NAME: !Ref BookTable
-          GUTENBERG_API_URL: "https://www.gutenberg.org/"
+          BOOKS_TABLE: !Ref BookTable
+          USER_BOOKS_TABLE: !Ref UserBooksTable
+          GUTENBERG_API_URL: "https://www.gutenberg.org"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref BookTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserBooksTable
       Events:
         GetBookAPI:
           Type: Api
@@ -112,20 +122,23 @@ Resources:
             RestApiId: !Ref Api
             Path: /book/{id}
             Method: GET
-            Auth:
-              Authorizer: UserAuthorizer
 
   GetUserBooks:
     Type: AWS::Serverless::Function
     Properties:
       Handler: books.get_user_books
       Runtime: python3.12
+      CodeUri: ./src
       Environment:
         Variables:
-          TABLE_NAME: !Ref BookTable
+          BOOKS_TABLE: !Ref BookTable
+          USER_BOOKS_TABLE: !Ref UserBooksTable
+          GUTENBERG_API_URL: "https://www.gutenberg.org"
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref BookTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserBooksTable
       Events:
         GetUserBooksAPI:
           Type: Api

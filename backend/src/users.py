@@ -2,12 +2,14 @@ import json
 import os
 import boto3
 import uuid
-from om datetime import datetime
+from datetime import datetime
+
+from utils import default_response
 
 dynamodb = boto3.resource('dynamodb')
 users_table = dynamodb.Table(os.environ['USERS_TABLE'])
 
-def register_user(event):
+def register_user(event, context):
     try:
 
         user_id = str(uuid.uuid4())
@@ -22,6 +24,7 @@ def register_user(event):
         )
 
         return {
+            **default_response,
             'statusCode': 201,
             'body': json.dumps({
                 'message': 'User registered successfully',
@@ -31,6 +34,7 @@ def register_user(event):
 
     except Exception as e:
         return {
+            **default_response,
             'statusCode': 500,
             'body': json.dumps({'error': str(e)})
         }
@@ -63,13 +67,15 @@ def authorizer(event, context):
             }
         )
 
-        return generate_policy(user_id, 'Allow', event['methodArn'], {
+        policy = generate_policy('*', 'Allow', '*') # event['methodArn'])
+        policy['context'] = {
             'user_id': user_id
-        })
+        }
+        return policy
 
     except Exception as e:
         print(f"Authorization failed: {str(e)}")
-        return generate_policy('user', 'Deny', event['methodArn'])
+        return generate_policy('*', 'Deny', '*')
 
 def generate_policy(principal_id, effect, resource):
     return {
